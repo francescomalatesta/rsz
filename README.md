@@ -1,6 +1,6 @@
 # Rsz!
 
-## A really simple CLI image resizer.
+**A really simple CLI image resizer.**
 
 Hi there, folks!
 
