@@ -7,17 +7,24 @@ import (
 	"image/png"
 	"io/ioutil"
 	"log"
+	"mime"
 	"os"
 	"path/filepath"
 	"strconv"
 
 	"github.com/codegangsta/cli"
 	"github.com/nfnt/resize"
+	"golang.org/x/image/tiff"
 )
 
 var outputWidth string
 var outputHeight string
 var outputFormat string
+var outputSubfolder string
+var inputOnlyFormat string
+
+var currentDirectory string
+var outputDirectory string
 
 func main() {
 	app := cli.NewApp()
@@ -41,105 +48,139 @@ func main() {
 			Destination: &outputHeight,
 		},
 		cli.StringFlag{
-			Name:        "format",
-			Value:       "jpg",
+			Name:        "to",
+			Value:       "jpeg",
 			Usage:       "Desired output format (available: jpg, png - Default: jpg)",
 			Destination: &outputFormat,
 		},
+		cli.StringFlag{
+			Name:        "in",
+			Value:       "",
+			Usage:       "Desired subfolder name for resized images. (examples: 'subfolder' or 'sub/subfolder')",
+			Destination: &outputSubfolder,
+		},
+		cli.StringFlag{
+			Name:        "only",
+			Value:       "",
+			Usage:       "Desired input format. If specified, other images with different format are going to be ignored.",
+			Destination: &inputOnlyFormat,
+		},
 	}
 
-	app.Action = func(c *cli.Context) {
-
-		fmt.Println("Rsz!")
-
-		currentDirectory, err := filepath.Abs(filepath.Dir(os.Args[0]))
-
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		files, err := ioutil.ReadDir(currentDirectory)
-
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		for _, file := range files {
-			fileName := file.Name()
-			fileExtension := filepath.Ext(fileName)
-
-			if fileExtension == ".jpg" || fileExtension == ".png" {
-				resizeImage(fileName, fileExtension, currentDirectory)
-			}
-		}
-
-		fmt.Println("... complete! :}")
-	}
+	app.Action = resizeCommand
 
 	app.Run(os.Args)
 }
 
-func resizeImage(fileName string, format string, outputDirectory string) {
-	imageFile, error := os.Open(fileName)
+func resizeCommand(c *cli.Context) {
+	fmt.Println("Rsz!")
 
-	if error != nil {
-		log.Fatal(error)
+	currentDirectory, err := filepath.Abs(filepath.Dir(os.Args[0]))
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	var imageStream image.Image
+	outputDirectory = currentDirectory
 
-	if format == ".jpg" {
-		imageStream = openJPGImage(imageFile)
-	} else {
-		imageStream = openPNGImage(imageFile)
+	if outputSubfolder != "" {
+		outputDirectory = outputDirectory + "/" + outputSubfolder
+		os.MkdirAll(outputDirectory, 0777)
 	}
 
-	imageFile.Close()
+	files, err := ioutil.ReadDir(currentDirectory)
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	oWidth, error := strconv.Atoi(outputWidth)
-	oHeight, error := strconv.Atoi(outputHeight)
+	for _, file := range files {
+		fileName := file.Name()
+		fileMimeType := mime.TypeByExtension(filepath.Ext(fileName))
 
-	if error != nil {
-		log.Fatal(error)
+		if imageTypeIsValid(fileMimeType) {
+			fmt.Println("- Resizing: " + fileName)
+			resizeImage(fileName)
+		}
+	}
+
+	fmt.Println("... complete! :}")
+}
+
+func resizeImage(fileName string) {
+	imageFile, err := os.Open(fileName)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	imageData := decodeInputImageFile(imageFile)
+
+	oWidth, err := strconv.Atoi(outputWidth)
+	oHeight, err := strconv.Atoi(outputHeight)
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	if oWidth == 0 && oHeight == 0 {
 		oWidth = 1024
 	}
 
-	resizedImageData := resize.Resize(uint(oWidth), uint(oHeight), imageStream, resize.Lanczos2)
-	resizedFileName := "resized-" + strconv.Itoa(resizedImageData.Bounds().Dx()) + "x" + strconv.Itoa(resizedImageData.Bounds().Dy()) + "-" + fileName[0:len(fileName)-len(format)]
+	resizedImageData := resize.Resize(uint(oWidth), uint(oHeight), imageData, resize.Lanczos2)
 
-	output, error := os.Create(outputDirectory + "/" + resizedFileName + "." + outputFormat)
-	if error != nil {
-		log.Fatal(error)
+	encodeImageOnOutputFile(resizedImageData, fileName)
+}
+
+func decodeInputImageFile(imageFile *os.File) image.Image {
+	imageData, _, err := image.Decode(imageFile)
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	if outputFormat == "jpg" {
-		jpeg.Encode(output, resizedImageData, nil)
-	} else {
-		png.Encode(output, resizedImageData)
+	imageFile.Close()
+
+	return imageData
+}
+
+func encodeImageOnOutputFile(imageData image.Image, fileName string) {
+	resizedFileName := "resized-" + strconv.Itoa(imageData.Bounds().Dx()) + "x" + strconv.Itoa(imageData.Bounds().Dy()) + "-" + fileName[0:len(fileName)-len(filepath.Ext(fileName))]
+	output, err := os.Create(outputDirectory + "/" + resizedFileName + "." + outputFormat)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if outputFormat == "jpeg" {
+		jpeg.Encode(output, imageData, nil)
+	}
+
+	if outputFormat == "png" {
+		png.Encode(output, imageData)
+	}
+
+	if outputFormat == "tiff" {
+		tiff.Encode(output, imageData, nil)
 	}
 
 	output.Close()
-
-	fmt.Println("- Resized: " + resizedFileName + "." + outputFormat)
 }
 
-func openJPGImage(imageFile *os.File) image.Image {
-	imageStream, error := jpeg.Decode(imageFile)
-	if error != nil {
-		log.Fatal(error)
+func imageTypeIsValid(mimeType string) bool {
+	if inputOnlyFormat != "" {
+		if mimeType == "image/"+inputOnlyFormat {
+			return true
+		}
+
+		return false
 	}
 
-	return imageStream
-}
-
-func openPNGImage(imageFile *os.File) image.Image {
-	imageStream, error := png.Decode(imageFile)
-	if error != nil {
-		log.Fatal(error)
+	if mimeType == "image/jpeg" {
+		return true
 	}
 
-	return imageStream
+	if mimeType == "image/png" {
+		return true
+	}
+
+	if mimeType == "image/tiff" {
+		return true
+	}
+
+	return false
 }
