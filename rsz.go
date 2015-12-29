@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/codegangsta/cli"
 	"github.com/nfnt/resize"
@@ -26,13 +27,15 @@ var inputOnlyFormat string
 var currentDirectory string
 var outputDirectory string
 
+var isVerbose bool
+
 func main() {
 	app := cli.NewApp()
 
 	app.Name = "Rsz!"
 	app.Usage = "A little CLI image resizer"
 	app.Author = "Francesco Malatesta"
-	app.Version = "0.1.0"
+	app.Version = "0.3.0"
 
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
@@ -55,7 +58,7 @@ func main() {
 		},
 		cli.StringFlag{
 			Name:        "in",
-			Value:       "",
+			Value:       "resized",
 			Usage:       "Desired subfolder name for resized images. (examples: 'subfolder' or 'sub/subfolder')",
 			Destination: &outputSubfolder,
 		},
@@ -65,6 +68,11 @@ func main() {
 			Usage:       "Desired input format. If specified, other images with different format are going to be ignored.",
 			Destination: &inputOnlyFormat,
 		},
+		cli.BoolFlag{
+			Name:        "verbose",
+			Usage:       "If specified, more info will be given during the process.",
+			Destination: &isVerbose,
+		},
 	}
 
 	app.Action = resizeCommand
@@ -73,7 +81,11 @@ func main() {
 }
 
 func resizeCommand(c *cli.Context) {
-	fmt.Println("Rsz!")
+	startTime := time.Now()
+
+	fmt.Println("Rsz! Simple Image Resizer 0.3.0")
+
+	convertedCounter := 0
 
 	currentDirectory, err := filepath.Abs(filepath.Dir(os.Args[0]))
 	if err != nil {
@@ -97,12 +109,31 @@ func resizeCommand(c *cli.Context) {
 		fileMimeType := mime.TypeByExtension(filepath.Ext(fileName))
 
 		if imageTypeIsValid(fileMimeType) {
-			fmt.Println("- Resizing: " + fileName)
+			convertedCounter++
+
+			if isVerbose {
+				fmt.Println("- Resizing: " + fileName)
+			}
+
 			resizeImage(fileName)
 		}
 	}
 
-	fmt.Println("... complete! :}")
+	if convertedCounter > 0 {
+		fmt.Println("... completed! :}")
+	} else {
+		fmt.Println("No images found here! :{")
+		os.Remove(outputDirectory)
+	}
+
+	if isVerbose && convertedCounter > 0 {
+		fmt.Println("--------------------------------------------------------------------------------")
+		fmt.Println("Converted Images: " + strconv.Itoa(convertedCounter))
+		fmt.Println("Destination Folder: " + outputDirectory)
+		fmt.Println("Destination Format: " + outputFormat)
+		fmt.Printf("Completed in: %.2f seconds\n", time.Since(startTime).Seconds())
+		fmt.Println("--------------------------------------------------------------------------------")
+	}
 }
 
 func resizeImage(fileName string) {
@@ -140,7 +171,7 @@ func decodeInputImageFile(imageFile *os.File) image.Image {
 }
 
 func encodeImageOnOutputFile(imageData image.Image, fileName string) {
-	resizedFileName := "resized-" + strconv.Itoa(imageData.Bounds().Dx()) + "x" + strconv.Itoa(imageData.Bounds().Dy()) + "-" + fileName[0:len(fileName)-len(filepath.Ext(fileName))]
+	resizedFileName := "resized-" + fileName[0:len(fileName)-len(filepath.Ext(fileName))]
 	output, err := os.Create(outputDirectory + "/" + resizedFileName + "." + outputFormat)
 	if err != nil {
 		log.Fatal(err)

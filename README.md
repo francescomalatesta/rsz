@@ -51,6 +51,8 @@ The resized images will be saved in `current_dir/resized` folder. This also work
 
     rsz --in "resized/images/here"
 
+**Note:** *The default value for this flag, if not specified, is "resized". This means that if you execute rsz without the `--in` flag, resized images will be saved in the "resized" folder as a default.*
+
 #### Filter Input by Format
 
 Let's say you have some JPEGs and PNGs, but you just want to resize the PNG files. No problem, just use
